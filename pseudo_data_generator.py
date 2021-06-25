@@ -180,8 +180,6 @@ def main():
 
     stride_angle = generate_stride_angle(N)
 
-    elevation_gain = generate_elevation_gain(N)
-
     # Generating the right foot side
     generate_csv(tm, 'right', timestamps, stride_pace, 
                  step_rate, contact_time,
