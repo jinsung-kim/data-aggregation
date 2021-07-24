@@ -1,6 +1,17 @@
 import csv # To create the CSV (built in)
 import random # To randomly generate values
-from datetime import datetime
+import numpy as np # Used to calculate the significant data
+
+# Time
+from datetime import date
+from dateutil.relativedelta import relativedelta
+
+from pymongo import MongoClient
+
+cluster = MongoClient("mongodb+srv://jinkim:SJsknyu774!@session-data.my1fw.mongodb.net/session-data?retryWrites=true&w=majority")
+
+database = cluster['gait']
+sessions_collection = database['sessions']
 
 '''
 Method for generating data:
@@ -99,6 +110,15 @@ def generate_stride_angle(N):
     return res
 
 
+def generate_stride_length(stride, step):
+    res = [0] * len(stride)
+
+    for i in range(len(stride)):
+        res[i] = (stride[i] * 60 * 2) / step[i]
+
+    return res
+
+
 def generate_elevation_gain(N):
     # First needs to generate range intervals
     interval = 1
@@ -144,50 +164,84 @@ def generate_csv(tm, dir, timestamps, stride_pace, step_rate,
             writer.writerow([timestamps[i], i + 1, stride_pace[i], step_rate[i], contact_time[i],
                              power[i], stride_angle[i], elevation_gain[i]])
 
+
+def calc(arr):
+    q1 = np.quantile(arr, 0.25)
+    med = np.quantile(arr, 0.5)
+    q3 = np.quantile(arr, 0.75)
+    inter = q3 - q1
+    mi = q1 - 1.5 * inter
+    ma = q1 + 1.5 * inter
+
+    return { "q1": q1, "med": med, "q3": q3, "min": mi, "max": ma }
+
+
+def generate_relevant(gait, step_rate, stride):
+    # Needs to generate the MIN, MAX, Q1, Q3, and MED for both left and right to be stored in the database
+
+    # Sorting all of the data
+    gait.sort()
+    step_rate.sort()
+    stride.sort()
+
+    # Gait calculations
+    g_r = calc(gait)
+
+    # Step rate calculations
+    s_r = calc(step_rate)
+
+    # Stride calculations
+    st_r = calc(stride)
+
+    res = {"gait_vel": g_r, "cadence": s_r, "stride_pace": st_r }
+    
+    return res
+
 # Where the calculations are made
-def main():
-    # Gets the current time
-    tm = datetime.now(tz = None)
+def main(s):
 
     timestamps = generate_timestamps()
-    N = len(timestamps)
 
     stride_pace = generate_stride_pace(timestamps)
 
     step_rate = generate_step_rate(stride_pace)
 
-    contact_time = generate_contact_time(step_rate)
+    stride_length = generate_stride_length(stride_pace, step_rate)
 
-    power = generate_power(contact_time)
-
-    stride_angle = generate_stride_angle(N)
-
-    elevation_gain = generate_elevation_gain(N)
-
-    # Generating the left foot side
-    generate_csv(tm, 'left', timestamps, stride_pace, 
-                 step_rate, contact_time,
-                 power, stride_angle, elevation_gain)
+    # Generating the left foot side (gait velocity, stride length, step length)
+    left = generate_relevant(stride_pace, step_rate, stride_length)
 
     # Generating different stats for the right side
     stride_pace = generate_stride_pace(timestamps)
 
     step_rate = generate_step_rate(stride_pace)
 
-    contact_time = generate_contact_time(step_rate)
-
-    power = generate_power(contact_time)
-
-    stride_angle = generate_stride_angle(N)
+    stride_length = generate_stride_length(stride_pace, step_rate)
 
     # Generating the right foot side
-    generate_csv(tm, 'right', timestamps, stride_pace, 
-                 step_rate, contact_time,
-                 power, stride_angle, elevation_gain)
+    right = generate_relevant(stride_pace, step_rate, stride_length)
+
+    d = date.today() + relativedelta(months=(random.randint(-6, 0))) + relativedelta(days=(random.randint(-28, 0)))
+    d = '{:%m/%d/%Y}'.format(d)
+
+    res = { "left": left, "right": right, "user": 1, "date": d }
+
+    if (d not in s):
+        try:
+            sessions_collection.insert_one(res)
+        except Exception as e:
+            print("Error: ", e)
+
+        s.add(d)
+
+    # print(res)
 
 
 if __name__ == "__main__":
-    main()
+    s = set()
 
+    for i in range(100):
+        main(s)
 
-
+    # main(s)
+    
